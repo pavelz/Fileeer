@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var downloadingPath: String?
     @State private var lastDownloadedURL: URL?
+    @State private var fileContent: String?
+    @State private var showTextViewer = false
 
     // Configure your server base URL here
     private let serverBaseURL = URL(string: "http://localhost:12345/")!
@@ -26,7 +28,7 @@ struct ContentView: View {
         default: return 0
         }
     }
-    
+
     var body: some View {
         NavigationSplitView {
             Group {
@@ -76,11 +78,10 @@ struct ContentView: View {
                 }
             }
             .task { await loadFiles() }
-            .alert("Download complete", isPresented: Binding(get: { lastDownloadedURL != nil }, set: { if !$0 { lastDownloadedURL = nil } })) {
-                Button("OK", role: .cancel) { lastDownloadedURL = nil }
-                Button("Open in Files") { openInFiles() }
-            } message: {
-                if let url = lastDownloadedURL { Text(url.lastPathComponent) }
+            .sheet(isPresented: $showTextViewer) {
+                if let content = fileContent {
+                    TextViewerSheet(content: content, url: lastDownloadedURL)
+                }
             }
         } detail: {
             VStack(spacing: 16) {
@@ -118,28 +119,50 @@ struct ContentView: View {
         do {
             let savedURL = try await service.downloadFile(atPath: file.path)
             lastDownloadedURL = savedURL
+
+            // Read the file so we can display it in the text viewer sheet
+            if let data = try? Data(contentsOf: savedURL),
+               let text = String(data: data, encoding: .utf8) {
+                fileContent = text
+                showTextViewer = true
+            }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
+}
 
-    private func openInFiles() {
-        guard let url = lastDownloadedURL else { return }
-        #if canImport(UIKit)
-        let controller = UIDocumentInteractionController(url: url)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.keyWindow?.rootViewController {
-            controller.presentPreview(animated: true)
+// MARK: - Text Viewer Sheet
+
+struct TextViewerSheet: View {
+    let content: String
+    let url: URL?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(content)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle(url?.lastPathComponent ?? "File")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if let url {
+                        ShareLink(item: url)
+                    }
+                }
+            }
         }
-        #endif
     }
 }
-
-#if canImport(UIKit)
-extension UIWindowScene {
-    var keyWindow: UIWindow? { self.windows.first { $0.isKeyWindow } }
-}
-#endif
 
 #Preview {
     ContentView()

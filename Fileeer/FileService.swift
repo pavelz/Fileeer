@@ -43,9 +43,9 @@ final class FileService {
 
     // MARK: - Public API
 
-    /// Connects and reads newline-delimited file paths until the server closes the connection.
+/// Connects and reads newline-delimited file paths until data stops coming or the connection closes.
     func fetchFileList() async throws -> [RemoteFile] {
-        let data = try await connectAndReadAll()
+        let data = try await connectAndReadUntilIdle()
         guard let text = String(data: data, encoding: .utf8) else { throw FileServiceError.decodingError }
         let paths = text.split(separator: "\n").map { String($0) }.filter { !$0.isEmpty }
         return paths.map { RemoteFile(path: $0) }
@@ -75,22 +75,60 @@ final class FileService {
         return conn
     }
 
-    private func connectAndReadAll() async throws -> Data {
+    private func connectAndReadUntilIdle(idleTimeout: TimeInterval = 0.5, totalTimeout: TimeInterval = 5.0) async throws -> Data {
         let conn = makeConnection()
+        let queue = DispatchQueue(label: "com.fileservice.network")
+
         return try await withCheckedThrowingContinuation { continuation in
             var buffer = Data()
+            var idleWorkItem: DispatchWorkItem?
+            var timeoutWorkItem: DispatchWorkItem?
+            var isResumed = false
 
-            func fail(_ error: Error) {
+            func finish(with result: Result<Data, Error>) {
+                guard !isResumed else { return }
+                isResumed = true
+                idleWorkItem?.cancel()
+                timeoutWorkItem?.cancel()
                 conn.cancel()
-                continuation.resume(throwing: error)
+                switch result {
+                case .success(let data):
+                    continuation.resume(returning: data)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
             }
+
+            func resetIdleTimer() {
+                idleWorkItem?.cancel()
+                let item = DispatchWorkItem {
+                    if !buffer.isEmpty {
+                        finish(with: .success(buffer))
+                    } else {
+                        finish(with: .failure(FileServiceError.receiveFailed))
+                    }
+                }
+                idleWorkItem = item
+                queue.asyncAfter(deadline: .now() + idleTimeout, execute: item)
+            }
+
+            // Overall timeout in case no response is received
+            let timeout = DispatchWorkItem {
+                if !buffer.isEmpty {
+                    finish(with: .success(buffer))
+                } else {
+                    finish(with: .failure(FileServiceError.connectionFailed))
+                }
+            }
+            timeoutWorkItem = timeout
+            queue.asyncAfter(deadline: .now() + totalTimeout, execute: timeout)
 
             conn.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     receiveLoop()
                 case .failed(let error):
-                    fail(error)
+                    finish(with: .failure(error))
                 case .cancelled:
                     break
                 default:
@@ -101,22 +139,22 @@ final class FileService {
             func receiveLoop() {
                 conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
                     if let error = error {
-                        fail(error)
+                        finish(with: .failure(error))
                         return
                     }
                     if let data = data, !data.isEmpty {
                         buffer.append(data)
+                        resetIdleTimer()
                     }
                     if isComplete {
-                        conn.cancel()
-                        continuation.resume(returning: buffer)
+                        finish(with: .success(buffer))
                     } else {
                         receiveLoop()
                     }
                 }
             }
 
-            conn.start(queue: .global(qos: .userInitiated))
+            conn.start(queue: queue)
         }
     }
 
@@ -180,6 +218,7 @@ final class FileService {
         let safePath = path.split(separator: "/").map(String.init)
         var url = docs
         for component in safePath {
+            print(component)
             url.append(path: component)
         }
         return url
