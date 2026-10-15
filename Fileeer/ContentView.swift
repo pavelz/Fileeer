@@ -17,7 +17,7 @@ struct ContentView: View {
     @State private var showTextViewer = false
 
     // Configure your server base URL here
-    private let serverBaseURL = URL(string: "http://localhost:12345/")!
+    private let serverBaseURL = URL(string: "http://Pavels-MacBook-Pro.local:12345/")!
     private var serverHost: String { serverBaseURL.host ?? "localhost" }
     private var serverPort: UInt16 {
         if let explicit = serverBaseURL.port { return UInt16(explicit) }
