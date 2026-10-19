@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var files: [RemoteFile] = []
@@ -13,6 +14,7 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var downloadingPath: String?
     @State private var lastDownloadedURL: URL?
+    @State private var lastSavedURL: URL?
     @State private var fileContent: String?
     @State private var showTextViewer = false
 
@@ -85,11 +87,21 @@ struct ContentView: View {
             }
         } detail: {
             VStack(spacing: 16) {
-                if let url = lastDownloadedURL {
+                if let savedURL = lastSavedURL {
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.green)
+                        Text("Saved for later review")
+                            .font(.headline)
+                        Text(savedURL.lastPathComponent)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let url = lastDownloadedURL {
                     Text("Saved to: \(url.path())")
                         .font(.footnote)
                         .multilineTextAlignment(.center)
-                        .padding()
                 } else {
                     Text("Select a file to download")
                 }
@@ -119,6 +131,22 @@ struct ContentView: View {
         do {
             let savedURL = try await service.downloadFile(atPath: file.path)
             lastDownloadedURL = savedURL
+
+            // Persist to Documents/Downloads for later review.
+            // .atomic overwrites in place if the file already exists.
+            if let data = try? Data(contentsOf: savedURL) {
+                let documentsURL = FileManager.default
+                    .urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let downloadsDir = documentsURL.appendingPathComponent("Downloads", isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: downloadsDir,
+                    withIntermediateDirectories: true
+                )
+                let persistentURL = downloadsDir.appendingPathComponent(file.path)
+                print ("Saving: \(persistentURL.path)")
+                try data.write(to: persistentURL, options: .atomic)
+                lastSavedURL = persistentURL
+            }
 
             // Read the file so we can display it in the text viewer sheet
             if let data = try? Data(contentsOf: savedURL),
@@ -160,6 +188,10 @@ struct TextViewerSheet: View {
                     }
                 }
             }
+        }
+        .task {
+            try? await Task.sleep(for: .seconds(2))
+            dismiss()
         }
     }
 }
