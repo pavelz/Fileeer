@@ -127,7 +127,7 @@ struct ContentView: View {
     private func download(file: RemoteFile) async {
         downloadingPath = file.path
         
-        let plainTextUTI = UTType.text       // public.plain-text
+        let plainTextUTI = UTType.plainText       // public.plain-text
         defer { downloadingPath = nil }
         let service = FileService(host: serverHost, port: serverPort)
         do {
@@ -140,9 +140,18 @@ struct ContentView: View {
                 let documentsURL = FileManager.default
                     .urls(for: .documentDirectory, in: .userDomainMask)[0]
                 
-                let persistentURL = documentsURL.appendingPathComponent(file.path, conformingTo: plainTextUTI)
+                let persistentURL = documentsURL
+                    .appendingPathComponent(file.path, conformingTo: plainTextUTI)
+                    .appendingPathExtension(for: plainTextUTI)
+                
                 print ("Saving: \(persistentURL.path)")
                 try data.write(to: persistentURL, options: .atomic)
+                // To show up the file in recents in Files app
+                let itemProvider = NSItemProvider()
+                itemProvider.registerDataRepresentation(for: .plainText, visibility: .all){ completion in
+                    completion(data, nil)
+                    return nil
+                }
                 lastSavedURL = persistentURL
             }
 
