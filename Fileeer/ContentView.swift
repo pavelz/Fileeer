@@ -126,6 +126,8 @@ struct ContentView: View {
 
     private func download(file: RemoteFile) async {
         downloadingPath = file.path
+        
+        let plainTextUTI = UTType.text       // public.plain-text
         defer { downloadingPath = nil }
         let service = FileService(host: serverHost, port: serverPort)
         do {
@@ -137,12 +139,8 @@ struct ContentView: View {
             if let data = try? Data(contentsOf: savedURL) {
                 let documentsURL = FileManager.default
                     .urls(for: .documentDirectory, in: .userDomainMask)[0]
-                let downloadsDir = documentsURL.appendingPathComponent("Downloads", isDirectory: true)
-                try FileManager.default.createDirectory(
-                    at: downloadsDir,
-                    withIntermediateDirectories: true
-                )
-                let persistentURL = downloadsDir.appendingPathComponent(file.path)
+                
+                let persistentURL = documentsURL.appendingPathComponent(file.path, conformingTo: plainTextUTI)
                 print ("Saving: \(persistentURL.path)")
                 try data.write(to: persistentURL, options: .atomic)
                 lastSavedURL = persistentURL

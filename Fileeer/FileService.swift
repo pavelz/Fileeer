@@ -43,28 +43,107 @@ final class FileService {
 
     // MARK: - Public API
 
-/// Connects and reads newline-delimited file paths until data stops coming or the connection closes.
+    /// Connects and reads newline-delimited file paths until data stops coming or the connection closes.
     func fetchFileList() async throws -> [RemoteFile] {
-        let data = try await connectAndReadUntilIdle()
-        guard let text = String(data: data, encoding: .utf8) else { throw FileServiceError.decodingError }
-        let paths = text.split(separator: "\n").map { String($0) }.filter { !$0.isEmpty }
+        let rawData = try await connectAndReadUntilIdle()
+        let listData = extractFileListData(from: rawData)
+        guard let text = String(data: listData, encoding: .utf8) else { throw FileServiceError.decodingError }
+        let paths = text.split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "0" && $0 != "\0" }
         return paths.map { RemoteFile(path: $0) }
     }
 
-    /// Opens a new connection, sends the requested path followed by a newline, then reads all bytes until close and writes to Documents.
+    /// Opens a new connection, sends the requested path followed by a newline,
+    /// then reads all bytes, strips the leading file list delimiter, and writes the file body to Documents.
     func downloadFile(atPath path: String) async throws -> URL {
         // Send path + newline then read all bytes
         let requestData = (path + "\n").data(using: .utf8)!
-        let data = try await connectSendAndReadAll(send: requestData)
+        let rawData = try await connectSendAndReadAll(send: requestData)
+        let fileData = extractFileContent(from: rawData)
 
-        let destinationURL = try destinationURLForDownloaded(path: path)
         do {
-            try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: destinationURL, options: .atomic)
+            let destinationURL = URL.documentsDirectory.appending(path: path)
+            try fileData.write(to: destinationURL, options: .atomic)
             return destinationURL
         } catch {
             throw FileServiceError.fileWriteFailed
         }
+    }
+
+    // MARK: - Delimiter Stripping Helpers
+
+    /// Extracts the file content by removing the leading file list and the delimiter.
+    /// Supports a null byte (`0x00`), a line with ASCII `'0'`, or `'0'` right after the file list.
+    private func extractFileContent(from data: Data) -> Data {
+        // 1. Check for null byte delimiter (0x00)
+        if let nullIndex = data.firstIndex(of: 0x00) {
+            var startIndex = data.index(after: nullIndex)
+            // Skip optional trailing \r\n or \n immediately after the null byte
+            if startIndex < data.endIndex && data[startIndex] == 0x0D {
+                startIndex = data.index(after: startIndex)
+            }
+            if startIndex < data.endIndex && data[startIndex] == 0x0A {
+                startIndex = data.index(after: startIndex)
+            }
+            return data.subdata(in: startIndex..<data.endIndex)
+        }
+
+        // 2. Check for ASCII '0' delimiter with newline boundaries
+        let newlinePatterns = [
+            "\r\n0\r\n",
+            "\n0\n",
+            "\r\n0\n",
+            "0\r\n",
+            "0\n"
+        ]
+        for pattern in newlinePatterns {
+            if let range = data.range(of: Data(pattern.utf8)) {
+                return data.subdata(in: range.upperBound..<data.endIndex)
+            }
+        }
+
+        // 3. Check for newline followed immediately by ASCII '0' (e.g. "...path\n0<binary/text content>")
+        let directPatterns = [
+            "\r\n0",
+            "\n0"
+        ]
+        for pattern in directPatterns {
+            if let range = data.range(of: Data(pattern.utf8)) {
+                return data.subdata(in: range.upperBound..<data.endIndex)
+            }
+        }
+
+        // 4. Fallback if the data starts directly with ASCII '0'
+        if data.first == 0x30 {
+            return data.subdata(in: data.index(after: data.startIndex)..<data.endIndex)
+        }
+
+        return data
+    }
+
+    /// Extracts the file list bytes occurring before the delimiter.
+    private func extractFileListData(from data: Data) -> Data {
+        if let nullIndex = data.firstIndex(of: 0x00) {
+            return data.subdata(in: data.startIndex..<nullIndex)
+        }
+
+        let delimiterPatterns = [
+            "\r\n0\r\n",
+            "\n0\n",
+            "\r\n0\n",
+            "0\r\n",
+            "0\n",
+            "\r\n0",
+            "\n0"
+        ]
+        for pattern in delimiterPatterns {
+            if let range = data.range(of: Data(pattern.utf8)) {
+                return data.subdata(in: data.startIndex..<range.lowerBound)
+            }
+        }
+
+        return data
     }
 
     // MARK: - Networking helpers
@@ -210,17 +289,4 @@ final class FileService {
         }
     }
 
-    // MARK: - File destinations
-
-    private func destinationURLForDownloaded(path: String) throws -> URL {
-        let docs = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        // Preserve nested folders from server path
-        let safePath = path.split(separator: "/").map(String.init)
-        var url = docs
-        for component in safePath {
-            print(component)
-            url.append(path: component)
-        }
-        return url
-    }
 }
