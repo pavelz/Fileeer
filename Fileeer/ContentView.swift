@@ -140,21 +140,22 @@ struct ContentView: View {
                 let documentsURL = FileManager.default
                     .urls(for: .documentDirectory, in: .userDomainMask)[0]
                 
+//                let safeFileName = URL(fileURLWithPath: file.path).lastPathComponent
                 let persistentURL = documentsURL
-                    .appendingPathComponent(file.path, conformingTo: plainTextUTI)
-                    .appendingPathExtension(for: plainTextUTI)
+                    .appendingPathComponent( file.path, conformingTo: plainTextUTI)
                 
                 print ("Saving: \(persistentURL.path)")
+                
                 try data.write(to: persistentURL, options: .atomic)
-                // To show up the file in recents in Files app
-                let itemProvider = NSItemProvider()
-                itemProvider.registerDataRepresentation(for: .plainText, visibility: .all){ completion in
-                    completion(data, nil)
-                    return nil
-                }
+                print("wrote to \(persistentURL.path)")
+//                // To show up the file in recents in Files app
+//                let itemProvider = NSItemProvider()
+//                itemProvider.registerDataRepresentation(for: .plainText, visibility: .all){ completion in
+//                    completion(data, nil)
+//                    return nil
+//                }
                 lastSavedURL = persistentURL
             }
-
             // Read the file so we can display it in the text viewer sheet
             if let data = try? Data(contentsOf: savedURL),
                let text = String(data: data, encoding: .utf8) {
