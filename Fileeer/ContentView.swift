@@ -146,7 +146,16 @@ struct ContentView: View {
                 
                 print ("Saving: \(persistentURL.path)")
                 
-                try data.write(to: persistentURL, options: .atomic)
+                var fls = FolderService(url: documentsURL)
+                fls.permExec(writeUrl: persistentURL, writeData: {
+                    do {
+                        try data.write(to: persistentURL, options: .atomic)
+                    } catch {
+                        errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        print(error)
+                        exit(0)
+                    }
+                })
                 print("wrote to \(persistentURL.path)")
 //                // To show up the file in recents in Files app
 //                let itemProvider = NSItemProvider()

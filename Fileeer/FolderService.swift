@@ -9,16 +9,20 @@ import Foundation
 
 
 final class FolderService {
+    var url: URL?
     
-    init(){
+    init(url: URL?){
+        
         // Get the url from UserDefaults
         let r:Data = Data()
         let d = UserDefaults.standard
-        d.setValue("localhost", forKey: "lastBookmark")
+        self.url = url
+        
+        d.setValue(nil as Data?, forKey: "lastBookmark")
         d.bool(forKey: "lastBookmarkOk")
     }
     
-    func permExec(writeUrl: URL?, writeData: ()->Void) -> URL? {
+    func permExec(writeUrl: URL?, writeData: () throws ->Void) -> URL? {
         
         // get the granted bookmark
         var d:UserDefaults = UserDefaults.standard
@@ -28,16 +32,17 @@ final class FolderService {
             if bkmk != nil {
                 try? URL(resolvingBookmarkData: bkmk ?? Data(), bookmarkDataIsStale:&stale)
             } else {
-                FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                writeUrl
             }
         
         // get perms and write stuff
         let granted = url?.startAccessingSecurityScopedResource()
+        
         defer {
             if(granted ?? false){ url?.stopAccessingSecurityScopedResource()}
         }
         
-        writeData()
+        try writeData()
         return url
     }
 }
