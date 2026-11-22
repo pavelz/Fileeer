@@ -147,7 +147,7 @@ struct ContentView: View {
                 print ("Saving: \(persistentURL.path)")
                 
                 var fls = FolderService(url: documentsURL)
-                fls.permExec(writeUrl: persistentURL, writeData: {
+                _ = fls.permExec(writeUrl: persistentURL, writeData: {
                     do {
                         try data.write(to: persistentURL, options: .atomic)
                     } catch {
